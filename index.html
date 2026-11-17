@@ -490,9 +490,22 @@ input.time-digital::-webkit-datetime-edit { padding: 0; }
   border-radius: 12px;
   padding: 12px 14px;
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   gap: 8px;
+}
+.calc-night-note {
+  flex-basis: 100%;
+  margin-top: 2px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: rgba(99, 102, 241, 0.18);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  color: #c7d2fe;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
 }
 .calc-left {
   display: flex;
@@ -1213,6 +1226,7 @@ input.time-digital:disabled,
           <span class="calc-pay-txt">예상 일급</span>
           <span class="calc-pay-val" id="calcTodayPay">0원</span>
         </div>
+        <div class="calc-night-note" id="calcNightNote" style="display:none;">🌙 자정을 넘긴 근무예요 · 퇴근은 <span id="calcNightOut">익일 01:00</span></div>
       </div>
 
       <!-- Memo -->
@@ -1539,6 +1553,36 @@ function onDatePicked() {
 }
 
 /* ============ 시간 계산 ============ */
+function timeToMin(t) {
+  if (!t) return NaN;
+  const parts = String(t).split(':');
+  const h = Number(parts[0]);
+  const m = Number(parts[1]);
+  if (isNaN(h) || isNaN(m)) return NaN;
+  return h * 60 + m;
+}
+
+// 퇴근 시각이 출근 시각보다 이르면 자정을 넘긴 근무(예: 18:00 → 01:00)
+function isOvernightShift(clockIn, clockOut) {
+  if (!clockIn || !clockOut) return false;
+  const a = timeToMin(clockIn);
+  const b = timeToMin(clockOut);
+  if (isNaN(a) || isNaN(b)) return false;
+  return b < a;
+}
+
+function outTimeLabel(clockIn, clockOut) {
+  if (!clockOut) return '';
+  return isOvernightShift(clockIn, clockOut) ? `익일 ${clockOut}` : clockOut;
+}
+
+function addDaysToKey(dateKey, days) {
+  const p = String(dateKey).split('-').map(Number);
+  const d = new Date(p[0], p[1] - 1, p[2]);
+  d.setDate(d.getDate() + days);
+  return getDateKey(d);
+}
+
 function minutesBetween(inStr, outStr) {
   if (!inStr || !outStr) return 0;
   const [ih, im] = inStr.split(':').map(Number);
@@ -1594,6 +1638,7 @@ function renderAll() {
   renderMonthlyTable();
   renderMonthlyTrend();
   renderStaffMonthlyCard();
+  renderOpenShiftHint();
 }
 
 function applyModeVisibility() {
@@ -1723,6 +1768,34 @@ function renderActiveStaffCard() {
   applyRecordLockUI();
 }
 
+/* 직원 전용 : 밤 근무 후 날짜가 바뀌었을 때 퇴근 입력을 놓치지 않게 안내 */
+function renderOpenShiftHint() {
+  const hint = document.getElementById('dateHint');
+  if (!hint) return;
+  const defaultText = '날짜를 누르면 달력에서 바로 고를 수 있어요';
+  if (!isDedicatedMode) {
+    hint.innerText = defaultText;
+    return;
+  }
+  const todayKey = getDateKey(new Date());
+  if (getDateKey(currentDate) !== todayKey) {
+    hint.innerText = defaultText;
+    return;
+  }
+  const rec = (appData.records[todayKey] || {})[currentStaffId];
+  if (rec && (rec.clockIn || rec.clockOut)) {
+    hint.innerText = defaultText;
+    return;
+  }
+  const yKey = addDaysToKey(todayKey, -1);
+  const prev = (appData.records[yKey] || {})[currentStaffId];
+  if (prev && prev.clockIn && !prev.clockOut) {
+    hint.innerText = `🌙 어제(${yKey.slice(5)}) ${prev.clockIn} 출근이 퇴근 미입력이에요. ◀ 어제를 눌러 퇴근을 저장해 주세요.`;
+  } else {
+    hint.innerText = defaultText;
+  }
+}
+
 /* ============ 직원 전용 모드 : 기록 잠금 ============ */
 // 저장소(시트)에 이미 들어 있는 기록만 잠근다. 방금 빈칸에 입력 중인 값은 잠그지 않는다.
 function currentStoredRecord() {
@@ -1822,6 +1895,8 @@ function calculateWorkPay() {
   if (!inVal || !outVal) {
     document.getElementById('calcWorkHours').innerText = "0시간 0분 (0.0h)";
     document.getElementById('calcTodayPay').innerText = "0원";
+    const emptyNote = document.getElementById('calcNightNote');
+    if (emptyNote) emptyNote.style.display = 'none';
     return { hours: 0, pay: 0, minutes: 0 };
   }
 
@@ -1831,6 +1906,14 @@ function calculateWorkPay() {
 
   document.getElementById('calcWorkHours').innerText = `${fmtHM(totalMinutes)} (${hours.toFixed(1)}h)`;
   document.getElementById('calcTodayPay').innerText = `${pay.toLocaleString()}원`;
+
+  const nightNote = document.getElementById('calcNightNote');
+  const nightOut = document.getElementById('calcNightOut');
+  if (nightNote && nightOut) {
+    const overnight = isOvernightShift(inVal, outVal);
+    nightNote.style.display = overnight ? 'block' : 'none';
+    if (overnight) nightOut.innerText = `익일 ${outVal}`;
+  }
 
   return { hours: hours, pay: pay, minutes: totalMinutes };
 }
@@ -1982,6 +2065,7 @@ async function sendToGoogleSheets(staffName, type, memo, timeStr, opts) {
     token: API_CONFIG.token,
     name: staffName,
     type: type,
+    day: dateKey,
     memo: memo || '',
     at: atStr
   };
@@ -2023,23 +2107,100 @@ async function sendToGoogleSheets(staffName, type, memo, timeStr, opts) {
   }
 }
 
-/* 시트 서버가 기록을 거절했을 때 */
-function handleSheetRejection(data, opts) {
-  const msg = String(data.message || '');
-  const tooOld = (data.error === 'invalid_time') && /오래되었|48시간/.test(msg);
+/* ============ 하루치 통째로 저장 (다른 날짜·자정 넘김도 OK) ============ */
+// 시트에는 (직원, 근무일자) 단위로 하루치를 통째로 저장한다.
+// → 오늘 미퇴근 기록이 있어도 과거 날짜를 채울 수 있고, 자정을 넘긴 퇴근도 그대로 저장된다.
+async function saveRecordToSheet(staffName, dateKey, clockIn, clockOut, memo, opts) {
+  opts = opts || {};
+  if (!API_CONFIG.url) return true;
 
-  if (tooOld) {
-    showToast('⏰ 48시간이 지난 기록은 직접 입력할 수 없어요. 아래 수정 요청 톡으로 사장님께 요청해 주세요!');
-    setTimeout(() => {
-      showToast('ℹ️ 방금 입력은 시트에 저장되지 않아 화면에서도 되돌렸어요.');
-    }, 2800);
-  } else if (data.error === 'invalid_time') {
-    showToast('⏰ 지금보다 뒤의 시각은 저장할 수 없어요. 시각을 다시 확인해 주세요!');
-  } else {
-    showToast(`⚠️ 시트 전송 안 됨: ${msg || '잠시 후 다시 시도해 주세요.'}`);
+  const payload = {
+    token: API_CONFIG.token,
+    action: 'save_attendance',
+    name: staffName,
+    day: dateKey,
+    clockIn: clockIn || '',
+    clockOut: clockOut || '',
+    memo: memo || ''
+  };
+
+  showToast(`🚀 [${staffName}] ${dateKey} 구글 시트로 전송 중...`);
+
+  let data = null;
+  try {
+    const res = await fetch(API_CONFIG.url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload)
+    });
+    try { data = await res.json(); } catch (parseErr) { data = null; }
+  } catch (err) {
+    // 응답 문구를 읽지 못하는 환경 → 예전 방식(전송만)으로 다시 보낸다
+    try {
+      await fetch(API_CONFIG.url, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload)
+      });
+      showToast(`✅ [${staffName}] 구글 시트로 전송했어요 (시트에서 확인)`);
+      return true;
+    } catch (err2) {
+      console.error("Sheet sync error:", err2);
+      showToast(`⚠️ 시트 전송 실패 (폰에는 저장되었습니다)`);
+      if (typeof opts.onReject === 'function') opts.onReject({ error: 'network' }, {});
+      return false;
+    }
   }
 
-  if (typeof opts.onReject === 'function') opts.onReject(data, { tooOld: tooOld });
+  if (data && data.ok === false) {
+    // 아직 예전 시트 코드가 돌고 있으면(하루 저장 기능 없음) 출근·퇴근 방식으로 넘긴다
+    if (data.error === 'invalid_type' || data.error === 'unknown_action' || data.error === 'invalid_action') {
+      console.warn('시트 코드가 예전 버전입니다. 출근/퇴근 방식으로 전송합니다.');
+      return legacySendRecordToSheet(staffName, dateKey, clockIn, clockOut, memo, opts);
+    }
+    handleSheetRejection(data, opts);
+    return false;
+  }
+
+  showToast(`✅ [${staffName}] 구글 시트에 저장 완료!`);
+  return true;
+}
+
+/* 예전 시트 코드 호환 : 출근 → 퇴근 두 번 전송(자정 넘김은 퇴근을 다음 날 날짜로 보낸다) */
+function legacySendRecordToSheet(staffName, dateKey, clockIn, clockOut, memo, opts) {
+  opts = opts || {};
+  const outKey = (clockIn && clockOut && isOvernightShift(clockIn, clockOut)) ? addDaysToKey(dateKey, 1) : dateKey;
+  if (clockIn && clockOut) {
+    sendToGoogleSheets(staffName, '출근', memo, clockIn, { dateKey: dateKey, onReject: opts.onReject });
+    setTimeout(() => {
+      sendToGoogleSheets(staffName, '퇴근', memo, clockOut, { dateKey: outKey, onReject: opts.onReject });
+    }, 1200);
+    return true;
+  }
+  if (clockIn) return sendToGoogleSheets(staffName, '출근', memo, clockIn, { dateKey: dateKey, onReject: opts.onReject });
+  return sendToGoogleSheets(staffName, '퇴근', memo, clockOut, { dateKey: outKey, onReject: opts.onReject });
+}
+
+/* 시트 서버가 기록을 거절했을 때 */
+function handleSheetRejection(data, opts) {
+  const msg = String((data && data.message) || '');
+
+  if (data && data.error === 'invalid_time') {
+    showToast(`⏰ 시트가 시각을 받아주지 않았어요: ${msg || '시각을 다시 확인해 주세요.'}`);
+  } else if (data && (data.error === 'invalid_day' || data.error === 'empty_record')) {
+    showToast(`⚠️ 저장하지 못했어요: ${msg || '날짜와 시각을 확인해 주세요.'}`);
+  } else {
+    showToast(`⚠️ 시트 저장 안 됨: ${msg || '잠시 후 다시 시도해 주세요.'}`);
+  }
+
+  setTimeout(() => {
+    showToast(isDedicatedMode
+      ? 'ℹ️ 방금 입력은 시트에 저장되지 않아 화면에서도 되돌렸어요.'
+      : 'ℹ️ 입력값은 그대로 두었어요. 잠시 후 다시 저장해 주세요.');
+  }, 2800);
+
+  if (typeof opts.onReject === 'function') opts.onReject(data, {});
 }
 
 /* ============ 기록 저장 / 삭제 ============ */
@@ -2143,11 +2304,11 @@ function saveCurrentRecord(silent) {
 
   const staff = appData.staffList.find(s => s.id === currentStaffId);
   if (staff && !silent) {
-    // 시트 서버가 48시간 초과 등으로 거절하면, 시트에 없는 기록이 화면에만 남지 않도록 되돌린다
+    // 시트가 거절하면(직원 전용) 시트에 없는 기록이 화면에만 남지 않도록 되돌린다
     const sendOpts = {
       dateKey: dateKey,
-      onReject: function (data, info) {
-        if (!isDedicatedMode || !(info && info.tooOld)) return;
+      onReject: function () {
+        if (!isDedicatedMode) return;
         const day = appData.records[dateKey] || {};
         if (prevSnapshot) {
           day[currentStaffId] = prevSnapshot;
@@ -2156,27 +2317,18 @@ function saveCurrentRecord(silent) {
         }
         appData.records[dateKey] = day;
         saveData();
-        renderActiveStaffCard();
         updateSummary();
         renderStaffChips();
         renderWorkList();
         renderKakaoPreview();
         renderMonthlyTable();
         renderStaffMonthlyCard();
+        applyRecordLockUI();
         showEditRequestButton(true);
       }
     };
 
-    if (inVal && outVal) {
-      sendToGoogleSheets(staff.name, '출근', memoVal, inVal, sendOpts);
-      setTimeout(() => {
-        sendToGoogleSheets(staff.name, '퇴근', memoVal, outVal, sendOpts);
-      }, 1200);
-    } else if (inVal) {
-      sendToGoogleSheets(staff.name, '출근', memoVal, inVal, sendOpts);
-    } else if (outVal) {
-      sendToGoogleSheets(staff.name, '퇴근', memoVal, outVal, sendOpts);
-    }
+    saveRecordToSheet(staff.name, dateKey, inVal, outVal, memoVal, sendOpts);
   }
 }
 
@@ -2252,7 +2404,7 @@ function renderWorkList() {
     let payClass = '';
 
     if (r.clockIn && r.clockOut) {
-      timeTxt = `${r.clockIn} ~ ${r.clockOut}`;
+      timeTxt = `${r.clockIn} ~ ${outTimeLabel(r.clockIn, r.clockOut)}`;
       payTxt = `${item.pay.toLocaleString()}원`;
     } else if (r.clockIn && !r.clockOut) {
       timeTxt = `${r.clockIn} ~ 퇴근 미입력`;
@@ -2516,7 +2668,7 @@ function renderStaffMonthlyCard() {
     const [y, m, dd] = d.key.split('-').map(Number);
     const dt = new Date(y, m - 1, dd);
     const dateTxt = `${m}.${dd} (${DAY_NAMES[dt.getDay()]})`;
-    const timeTxt = d.clockOut ? `${d.clockIn} ~ ${d.clockOut}` : `${d.clockIn} ~ 진행 중`;
+    const timeTxt = d.clockOut ? `${d.clockIn} ~ ${outTimeLabel(d.clockIn, d.clockOut)}` : `${d.clockIn} ~ 진행 중`;
     const hourTxt = d.min > 0 ? fmtHours(d.min) : '-';
     const payTxt = d.min > 0 ? `${d.pay.toLocaleString()}원` : '-';
     html += `
@@ -2543,6 +2695,7 @@ function generateOwnerConfirmationText(staffId) {
 
   const clockIn = document.getElementById('inputClockIn').value || rec.clockIn || "--:--";
   const clockOut = document.getElementById('inputClockOut').value || rec.clockOut || "--:--";
+  const clockOutLabel = (clockOut === '--:--') ? clockOut : outTimeLabel(clockIn, clockOut);
   const memo = document.getElementById('inputMemo').value.trim() || rec.memo || "";
 
   const minutes = minutesBetween(clockIn, clockOut);
@@ -2555,7 +2708,7 @@ function generateOwnerConfirmationText(staffId) {
   text += `■ 근무일: ${dateStr}\n\n`;
   text += `[근무 내역]\n`;
   text += `- 출근 시각: ${clockIn}\n`;
-  text += `- 퇴근 시각: ${clockOut}\n`;
+  text += `- 퇴근 시각: ${clockOutLabel}\n`;
   text += `- 실 근무시간: ${hours.toFixed(1)}시간\n`;
   text += `- 적용 시급: ${Number(staff.wage).toLocaleString()}원\n`;
   text += `━━━━━━━━━━━━━━━━━━━━\n`;
@@ -2578,6 +2731,7 @@ function generateStaffReportText(staffId) {
 
   const clockIn = document.getElementById('inputClockIn').value || rec.clockIn || "--:--";
   const clockOut = document.getElementById('inputClockOut').value || rec.clockOut || "--:--";
+  const clockOutLabel = (clockOut === '--:--') ? clockOut : outTimeLabel(clockIn, clockOut);
   const memo = document.getElementById('inputMemo').value.trim() || rec.memo || "";
 
   const minutes = minutesBetween(clockIn, clockOut);
@@ -2592,7 +2746,7 @@ function generateStaffReportText(staffId) {
   text += `■ 근무일: ${dateStr}\n\n`;
   text += `[이 날 근무]\n`;
   text += `- 출근: ${clockIn}\n`;
-  text += `- 퇴근: ${clockOut}\n`;
+  text += `- 퇴근: ${clockOutLabel}\n`;
   text += `- 근무시간: ${fmtHM(minutes)} (${(minutes / 60).toFixed(1)}h)\n`;
   text += `- 시급: ${Number(staff.wage).toLocaleString()}원\n`;
   text += `- 오늘 급여: ${pay.toLocaleString()}원\n`;
@@ -2631,7 +2785,7 @@ function generateTotalSummaryText() {
     if (!r.clockOut) {
       reports.push(`[${s.name} - ${s.role || '직원'}]\n- 출근: ${r.clockIn} (현재 근무 중 🟢)\n- 시급: ${Number(s.wage).toLocaleString()}원`);
     } else {
-      let rpt = `[${s.name} - ${s.role || '직원'}]\n- 출퇴근: ${r.clockIn} ~ ${r.clockOut} (${(item.min / 60).toFixed(1)}h)\n- 시급: ${Number(s.wage).toLocaleString()}원 / 일급: ${item.pay.toLocaleString()}원`;
+      let rpt = `[${s.name} - ${s.role || '직원'}]\n- 출퇴근: ${r.clockIn} ~ ${outTimeLabel(r.clockIn, r.clockOut)} (${(item.min / 60).toFixed(1)}h)\n- 시급: ${Number(s.wage).toLocaleString()}원 / 일급: ${item.pay.toLocaleString()}원`;
       if (r.memo) rpt += `\n- 메모: ${r.memo}`;
       reports.push(rpt);
     }
@@ -2662,7 +2816,7 @@ function generateEditRequestText() {
   let curTxt = '기록 없음';
   if (rec.clockIn && rec.clockOut) {
     const m = minutesBetween(rec.clockIn, rec.clockOut);
-    curTxt = `${rec.clockIn} ~ ${rec.clockOut} (${(m / 60).toFixed(1)}h)`;
+    curTxt = `${rec.clockIn} ~ ${outTimeLabel(rec.clockIn, rec.clockOut)} (${(m / 60).toFixed(1)}h)`;
   } else if (rec.clockIn) {
     curTxt = `${rec.clockIn} ~ 퇴근 미입력`;
   } else if (rec.clockOut) {
