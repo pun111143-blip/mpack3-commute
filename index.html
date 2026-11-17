@@ -901,6 +901,119 @@ input.time-digital:disabled,
   border-top: 2px solid var(--border);
 }
 
+/* 직원별 일별 근무 내역 (사장님 전용) */
+.md-filter {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 1px 1px 3px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.md-filter::-webkit-scrollbar { display: none; }
+.md-chip {
+  flex: 0 0 auto;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 800;
+  white-space: nowrap;
+  padding: 6px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.6);
+  color: var(--text-sub);
+  cursor: pointer;
+}
+.md-chip.active {
+  background: rgba(56, 189, 248, 0.18);
+  border-color: var(--primary);
+  color: #e0f2fe;
+}
+.md-body { display: flex; flex-direction: column; gap: 10px; }
+.md-staff {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.4);
+  overflow: hidden;
+}
+.md-staff-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 8px;
+  flex-wrap: wrap;
+  padding: 8px 11px;
+  background: rgba(30, 41, 59, 0.7);
+  border-bottom: 1px solid var(--border);
+}
+.md-staff-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 900;
+}
+.md-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 0 6px var(--primary-glow);
+}
+.md-staff-meta {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--text-sub);
+  white-space: nowrap;
+}
+.md-staff-meta b { color: #34d399; font-weight: 900; }
+.md-staff-meta .md-total-pay { color: var(--primary); font-weight: 900; }
+.md-rows { display: flex; flex-direction: column; }
+.md-row {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 8px;
+  padding: 8px 11px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(51, 65, 85, 0.5);
+  color: var(--text-main);
+  font-family: inherit;
+  font-size: 11.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.md-row:last-child { border-bottom: none; }
+.md-row:active { background: rgba(56, 189, 248, 0.08); }
+.md-left {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 7px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.md-date { font-weight: 800; white-space: nowrap; }
+.md-date small { font-size: 10.5px; font-weight: 700; color: var(--text-sub); }
+.md-time { color: #cbd5e1; font-weight: 700; }
+.md-time.md-pending { color: #fbbf24; }
+.md-right { display: flex; align-items: baseline; gap: 7px; flex: 0 0 auto; }
+.md-hours { color: #34d399; font-weight: 900; }
+.md-pay { color: var(--primary); font-weight: 900; white-space: nowrap; }
+.md-memo {
+  flex: 1 0 100%;
+  font-size: 10.5px;
+  color: var(--text-sub);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.md-none { padding: 11px; font-size: 11.5px; color: var(--text-sub); }
+.md-foot { font-size: 10.5px; color: var(--text-muted); text-align: center; }
+
 /* 월별 인건비 추이 */
 .trend-summary {
   display: grid;
@@ -1316,6 +1429,21 @@ input.time-digital:disabled,
       </table>
     </div>
 
+    <!-- 사장님 전용 : 직원별 일별 근무 내역 -->
+    <div class="card" id="monthlyDailyCard">
+      <div class="card-head">
+        <span class="card-title">📅 직원별 일별 근무 내역</span>
+        <span class="card-sub" id="mdRangeLabel">11월</span>
+      </div>
+      <div class="md-filter" id="mdFilter">
+        <!-- 직원 필터 버튼 JS로 렌더 -->
+      </div>
+      <div class="md-body" id="mdBody">
+        <!-- JS로 렌더 -->
+      </div>
+      <div class="md-foot">날짜를 누르면 그 날짜의 출퇴근 기록 화면으로 바로 이동해요</div>
+    </div>
+
     <!-- 사장님 전용 : 월별 인건비 추이 (직원 전용 링크에서는 숨김) -->
     <div class="card" id="trendCard">
       <div class="card-head">
@@ -1408,6 +1536,7 @@ let appData = defaultData;
 let currentDate = new Date();
 let currentStaffId = "s1";
 let editingStaffId = null;
+let monthlyStaffFilter = 'all';   // 월간 정산표 > 직원별 일별 근무 내역 필터 ('all' 또는 직원 id)
 
 let isDedicatedMode = false;
 let dedicatedStaffName = '';
@@ -1637,6 +1766,7 @@ function renderAll() {
   renderKakaoPreview();
   renderMonthlyTable();
   renderMonthlyTrend();
+  renderMonthlyDaily();
   renderStaffMonthlyCard();
   renderOpenShiftHint();
 }
@@ -1658,6 +1788,7 @@ function applyModeVisibility() {
   showEl('dedicatedStaffNotice', !owner, 'block');
   showEl('staffMonthlyCard', !owner, 'flex');
   showEl('trendCard', owner, 'flex');
+  showEl('monthlyDailyCard', owner, 'flex');
 
   const noticeName = document.getElementById('dedicatedNoticeName');
   if (noticeName) noticeName.innerText = dedicatedStaffName || '';
@@ -2228,6 +2359,8 @@ async function clearCurrentRecord() {
   renderWorkList();
   renderKakaoPreview();
   renderMonthlyTable();
+  renderMonthlyTrend();
+  renderMonthlyDaily();
   renderStaffMonthlyCard();
   showToast(`🗑️ [${staff.name}] 님의 ${dateKey} 기록이 삭제되었습니다.`);
 
@@ -2296,6 +2429,8 @@ function saveCurrentRecord(silent) {
   renderWorkList();
   renderKakaoPreview();
   renderMonthlyTable();
+  renderMonthlyTrend();
+  renderMonthlyDaily();
   renderStaffMonthlyCard();
   applyRecordLockUI();
   if (!silent) {
@@ -2322,6 +2457,8 @@ function saveCurrentRecord(silent) {
         renderWorkList();
         renderKakaoPreview();
         renderMonthlyTable();
+        renderMonthlyTrend();
+        renderMonthlyDaily();
         renderStaffMonthlyCard();
         applyRecordLockUI();
         showEditRequestButton(true);
@@ -2458,7 +2595,7 @@ function monthStats(staffId, date) {
     const pay = payOf(min, wage);
     totalMin += min;
     totalPay += pay;
-    daily.push({ key: k, clockIn: r.clockIn, clockOut: r.clockOut, min: min, pay: pay });
+    daily.push({ key: k, clockIn: r.clockIn, clockOut: r.clockOut, min: min, pay: pay, memo: r.memo || '' });
   });
 
   return { year, month, prefix, days, totalMin, totalPay, wage, daily };
@@ -2496,6 +2633,145 @@ function renderMonthlyTable() {
   `;
 
   tbody.innerHTML = html;
+}
+
+/* ============ 직원별 일별 근무 내역 (사장님 전용) ============ */
+function monthPrefixOf(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+// 직원 필터 버튼 전환
+function setMonthlyStaffFilter(id) {
+  monthlyStaffFilter = id || 'all';
+  renderMonthlyDaily();
+}
+
+// 일별 행을 누르면 그 날짜·그 직원의 출퇴근 기록 화면으로 이동
+function jumpToMonthDay(dateKey, staffId) {
+  if (isDedicatedMode) return;
+  const p = String(dateKey).split('-').map(Number);
+  if (p.length < 3 || !p[0] || !p[1] || !p[2]) return;
+  currentDate = new Date(p[0], p[1] - 1, p[2]);
+  const staff = appData.staffList.find(s => s.id === staffId);
+  if (staff) currentStaffId = staff.id;
+  renderAll();
+  switchView('daily');
+  const card = document.getElementById('staffCard');
+  if (card) {
+    try { card.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { card.scrollIntoView(); }
+    card.classList.remove('flash');
+    void card.offsetWidth;
+    card.classList.add('flash');
+    setTimeout(() => card.classList.remove('flash'), 1900);
+  }
+  showToast(`📅 ${p[1]}. ${p[2]} ${staff ? staff.name + ' 님' : ''} 근무일로 이동했어요`);
+}
+
+function renderMonthlyDaily() {
+  const card = document.getElementById('monthlyDailyCard');
+  if (!card) return;
+  // 직원 전용 링크 화면에서는 다른 직원 내역을 절대 보여주지 않는다
+  if (isDedicatedMode) {
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = '';
+
+  const filterWrap = document.getElementById('mdFilter');
+  const body = document.getElementById('mdBody');
+  const range = document.getElementById('mdRangeLabel');
+  if (!filterWrap || !body) return;
+
+  const month = currentDate.getMonth() + 1;
+  const prefix = monthPrefixOf(currentDate) + '-';
+
+  // 등록된 직원 + 이번 달 기록에만 남아 있는 직원까지 모두 포함
+  const staffList = appData.staffList.map(s => ({ id: s.id, name: s.name }));
+  Object.keys(appData.records)
+    .filter(k => k.indexOf(prefix) === 0)
+    .forEach(k => {
+      Object.keys(appData.records[k] || {}).forEach(sid => {
+        if (!staffList.some(x => x.id === sid)) staffList.push({ id: sid, name: '(삭제된 직원)' });
+      });
+    });
+
+  if (monthlyStaffFilter !== 'all' && !staffList.some(s => s.id === monthlyStaffFilter)) {
+    monthlyStaffFilter = 'all';
+  }
+
+  // ── 직원 필터 버튼 ──
+  let chips = `<button type="button" class="md-chip ${monthlyStaffFilter === 'all' ? 'active' : ''}" onclick="setMonthlyStaffFilter('all')">전체</button>`;
+  staffList.forEach(s => {
+    chips += `<button type="button" class="md-chip ${monthlyStaffFilter === s.id ? 'active' : ''}" onclick="setMonthlyStaffFilter('${s.id}')">${escapeHtml(s.name)}</button>`;
+  });
+  filterWrap.innerHTML = chips;
+
+  // ── 직원별 블록 ──
+  let blocks = '';
+  let workedStaff = 0;
+
+  staffList.forEach(s => {
+    if (monthlyStaffFilter !== 'all' && monthlyStaffFilter !== s.id) return;
+    const sum = monthStats(s.id, currentDate);
+    if (sum.days > 0) workedStaff++;
+
+    blocks += `<div class="md-staff">
+      <div class="md-staff-head">
+        <span class="md-staff-name"><span class="md-dot"></span>${escapeHtml(s.name)}</span>
+        <span class="md-staff-meta">${sum.days}일 · <b>${fmtHours(sum.totalMin)}</b> · <span class="md-total-pay">${sum.totalPay.toLocaleString()}원</span></span>
+      </div>`;
+
+    if (sum.daily.length === 0) {
+      blocks += `<div class="md-none">이번 달 근무 기록 없음</div>`;
+    } else {
+      blocks += `<div class="md-rows">`;
+      sum.daily.forEach(d => {
+        const [y, m, dd] = d.key.split('-').map(Number);
+        const dt = new Date(y, m - 1, dd);
+        const dateTxt = `${m}.${String(dd).padStart(2, '0')} <small>(${DAY_NAMES[dt.getDay()]})</small>`;
+        const ariaDate = `${m}월 ${dd}일 ${DAY_NAMES[dt.getDay()]}요일`;
+        let timeTxt = '';
+        let pendingCls = '';
+        if (d.clockIn && d.clockOut) {
+          timeTxt = `${d.clockIn} ~ ${outTimeLabel(d.clockIn, d.clockOut)}`;
+        } else if (d.clockIn) {
+          timeTxt = `${d.clockIn} ~ 미퇴근`;
+          pendingCls = ' md-pending';
+        } else {
+          timeTxt = `출근 미입력 ~ ${d.clockOut || ''}`;
+          pendingCls = ' md-pending';
+        }
+        const hourTxt = d.min > 0 ? fmtHours(d.min) : '—';
+        const payTxt = d.min > 0 ? `${d.pay.toLocaleString()}원` : '—';
+        const memo = String(d.memo || '').replace(/\[전송:[^\]]*\]/g, '').trim();
+
+        blocks += `<button type="button" class="md-row" onclick="jumpToMonthDay('${d.key}','${s.id}')" aria-label="${ariaDate} 근무 기록 열기">
+          <span class="md-left">
+            <span class="md-date">${dateTxt}</span>
+            <span class="md-time${pendingCls}">${timeTxt}</span>
+          </span>
+          <span class="md-right"><span class="md-hours">${hourTxt}</span><span class="md-pay">${payTxt}</span></span>
+          ${memo ? `<span class="md-memo">📝 ${escapeHtml(memo)}</span>` : ''}
+        </button>`;
+      });
+      blocks += `</div>`;
+    }
+    blocks += `</div>`;
+  });
+
+  if (!blocks) {
+    blocks = `<div class="md-none">이번 달 근무 기록이 없습니다.</div>`;
+  }
+  body.innerHTML = blocks;
+
+  if (range) {
+    if (monthlyStaffFilter === 'all') {
+      range.innerText = `${month}월 · ${staffList.length}명 중 ${workedStaff}명 근무`;
+    } else {
+      const picked = staffList.find(s => s.id === monthlyStaffFilter);
+      range.innerText = `${month}월 · ${picked ? picked.name : ''}`;
+    }
+  }
 }
 
 /* ============ 월별 인건비 추이 (사장님 전용) ============ */
